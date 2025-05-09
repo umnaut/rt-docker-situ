@@ -1,0 +1,51 @@
+### Base configuration ###
+Set($rtname, 'rt');
+Set($WebDomain, 'localhost');
+Set($WebPort, 443);
+Set($CanonicalizeRedirectURLs, 1);
+Set($CanonicalizeURLsInFeeds, 1);
+
+Plugin('RT::Extension::MergeUsers');
+Plugin('RT::Extension::TerminalTheme');
+
+### Database connection ###
+Set($DatabaseType, 'Pg' );
+Set($DatabaseHost, 'db');
+Set($DatabasePort, '5432');
+Set($DatabaseUser, 'rt');
+Set($DatabasePassword, 'password');
+Set($DatabaseName, 'rt');
+Set($DatabaseAdmin, "rt");
+
+Set($SendmailPath, '/usr/bin/msmtp');
+
+### GnuPG configuration ###
+Set(%GnuPG,
+  Enable                 => 1,
+  GnuPG                  => 'gpg',
+  Passphrase             => undef,
+  OutgoingMessagesFormat => 'RFC'
+);
+
+Set(%GnuPGOptions,
+  homedir             => '/opt/rt5/var/data/gpg',
+  passphrase          => 'PASSPHRASE',
+  keyserver           => 'hkps://keys.openpgp.org',
+  'keyserver-options' => 'auto-key-retrieve timeout=20',
+  'auto-key-locate'   => 'keyserver',
+);
+
+### SMIME configuration ###
+Set(%SMIME,
+    Enable             => 1,
+    AcceptUntrustedCAs => 1,
+    OpenSSL            => '/usr/bin/openssl',
+    Keyring            => '/opt/rt5/var/data/smime',
+    CAPath             => '/opt/rt5/var/data/smime/signing-ca.pem',
+    Passphrase => {
+        'user@user.com' => 'PASSPHRASE',
+        ''              => 'fallback',
+    },
+);
+
+1;

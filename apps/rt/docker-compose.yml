@@ -1,0 +1,129 @@
+x-app: &default-app
+  build:
+    context: .
+  image: firefart/requesttracker:latest
+  restart: unless-stopped
+  configs:
+    - source: rt_site_config
+      target: /opt/rt5/etc/RT_SiteConfig.pm
+    - source: msmtp
+      target: /etc/msmtprc
+    - source: getmail
+      target: /getmail/getmailrc
+    - source: crontab
+      target: /crontab # needed as docker compose mounts the config as a bind mount and the uid parameter is not working here
+  volumes:
+    - /var/lib/apps/rt/rt-data/msmtp/:/msmtp:ro
+    - /var/lib/apps/rt/rt-data/gpg/:/opt/rt5/var/data/gpg
+    - /var/lib/apps/rt/rt-data/smime/:/opt/rt5/var/data/smime:ro
+    - /var/lib/apps/rt/rt-data/shredder/:/opt/rt5/var/data/RT-Shredder
+    - /etc/localtime:/etc/localtime:ro
+    - /var/lib/apps/rt/rt-data/cron/:/cron
+  # make the host available inside the image
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  depends_on:
+   db:
+     condition: service_healthy
+  networks:
+    - net
+
+services:
+  rt:
+    <<: *default-app
+    hostname: rt
+
+
+  cron:
+    <<: *default-app
+    hostname: cron
+    # the cron daemon needs to run as root
+    user: root
+    command: [ "/root/cron_entrypoint.sh" ]
+    # disable the healthcheck from the main dockerfile
+    healthcheck:
+      disable: true
+    depends_on:
+      # needs to be up so we can use mailgate from the cron container
+      rt:
+        condition: service_healthy
+        restart: true
+      # we send rt-mailgate over to caddy
+      caddy:
+        condition: service_healthy
+        restart: true
+
+  caddy:
+    image: caddy:latest
+    hostname: caddy
+    restart: unless-stopped
+    ports:
+      - "0.0.0.0:443:443"
+      - "127.0.0.1:8080:8080" # expose mailgate vhost to host
+    configs:
+      - source: caddyfile
+        target: /etc/caddy/Caddyfile
+    volumes:
+      - /var/lib/apps/rt/certs/:/certs/:ro
+      - /etc/localtime:/etc/localtime:ro
+      - vol_caddy_data:/data
+      - vol_caddy_config:/config
+    healthcheck:
+      test: [ "CMD", "wget", "-O", "-", "-q", "http://127.0.0.1:1337/" ]
+      interval: 10s
+      timeout: 10s
+      retries: 3
+    depends_on:
+      rt:
+        condition: service_healthy
+        restart: true
+    networks:
+      - net
+
+  db:
+    image: postgres:latest
+    restart: "no"
+    environment:
+      POSTGRES_DB: rt
+      POSTGRES_USER: rt
+      ####
+      POSTGRES_PASSWORD: password
+      # Pick a better password
+      # Also update in var-lib-apps/rt/config/RT_SiteConfig.pm
+      # Set($DatabasePassword, 'password'); line specifically
+      ####
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    volumes:
+      - /var/lib/apps/rt/db-data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    networks:
+      - net
+      
+configs:
+  caddyfile:
+    file: /var/lib/apps/rt/config/Caddyfile
+  rt_site_config:
+    file: /var/lib/apps/rt/config/RT_SiteConfig.pm
+  msmtp:
+    file: /var/lib/apps/rt/config/msmtp.conf
+  getmail:
+    file: /var/lib/apps/rt/config/getmailrc
+  crontab:
+    file: /var/lib/apps/rt/config/crontab
+
+volumes:
+  vol_db:
+  vol_caddy_config:
+  vol_caddy_data:
+
+networks:
+  net:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: br_rt
